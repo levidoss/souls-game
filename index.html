@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Studio Ghibli - Sanctuary of Spirits (3rd Person Fox)</title>
     <style>
         * {
@@ -10,6 +10,8 @@
             margin: 0;
             padding: 0;
             user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
         }
         body, html {
             width: 100%;
@@ -34,7 +36,7 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            padding: 28px;
+            padding: 24px;
             z-index: 10;
         }
         .hud-top {
@@ -166,6 +168,80 @@
             transform: translateY(-2px);
             box-shadow: 0 12px 32px rgba(5, 150, 105, 0.6);
         }
+
+        /* --- MOBILE CONTROLS OVERLAY --- */
+        #mobile-controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 20;
+            display: none;
+        }
+        .joystick-zone {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 130px;
+            height: 130px;
+            background: rgba(255, 255, 255, 0.12);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            pointer-events: auto;
+            backdrop-filter: blur(6px);
+        }
+        .joystick-knob {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 50px;
+            height: 50px;
+            margin-top: -25px;
+            margin-left: -25px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            pointer-events: none;
+        }
+        .mobile-btn-group {
+            position: absolute;
+            bottom: 35px;
+            right: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            pointer-events: auto;
+        }
+        .mobile-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            backdrop-filter: blur(8px);
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.85rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+            touch-action: manipulation;
+        }
+        .mobile-btn:active, .mobile-btn.active {
+            background: rgba(5, 150, 105, 0.8);
+            transform: scale(0.95);
+        }
+
+        @media (max-width: 768px) {
+            .controls-hint { display: none; }
+            #mobile-controls { display: block; }
+            .world-title { font-size: 1.1rem; }
+            .world-subtitle { font-size: 0.75rem; }
+            .hud-card { font-size: 0.72rem; padding: 8px 14px; }
+        }
     </style>
 </head>
 <body>
@@ -173,7 +249,7 @@
     <div id="start-overlay">
         <div class="start-card">
             <h2>Sanctuary of Souls</h2>
-            <p>Explore an expanded Ghibli-inspired realm as a fox with smooth third-person camera physics, solid spatial collision, and atmospheric soundscapes.</p>
+            <p>Explore an expanded Ghibli-inspired realm as a fox with smooth third-person camera physics, dynamic biome audio synthesis, wind modulation, and mobile touch controls.</p>
             <button class="start-btn" id="enter-btn">ENTER SANCTUARY</button>
         </div>
     </div>
@@ -192,6 +268,17 @@
         <div class="hud-bottom">
             <div class="hud-card" id="biome-indicator">BIOME: ANCIENT RUINS</div>
             <div class="hud-card" id="time-indicator">TIME: 12:00 PM (DAY)</div>
+        </div>
+    </div>
+
+    <!-- Mobile Touch Interface -->
+    <div id="mobile-controls">
+        <div class="joystick-zone" id="joystick-base">
+            <div class="joystick-knob" id="joystick-knob"></div>
+        </div>
+        <div class="mobile-btn-group">
+            <div class="mobile-btn" id="btn-jump">JUMP</div>
+            <div class="mobile-btn" id="btn-run">RUN</div>
         </div>
     </div>
 
@@ -270,36 +357,52 @@
 
         const noise = new SimplexNoise();
 
-        // --- UPGRADED ADVANCED WEB AUDIO SOUND ENGINE ---
+        // --- ENHANCED WEB AUDIO SOUND ENGINE ---
         class SoundEngine {
             constructor() {
                 this.ctx = null;
                 this.isInit = false;
                 this.lastStepTime = 0;
-                this.footstepIndex = 0;
+
+                this.bgmGains = {};
+                this.bgmOscs = [];
+                
+                this.biomes = [
+                    'ANCIENT RUINS (CENTER)',
+                    'RED AUTUMN BIOME',
+                    'PINK BLOSSOM BIOME',
+                    'MYSTIC VIOLET BIOME',
+                    'EMERALD MEADOW BIOME'
+                ];
             }
 
             init() {
                 if (this.isInit) return;
-                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioCtx();
+                
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+
                 this.isInit = true;
 
-                // Reverb/Convolver setup for ambient spatial feel
+                // Master Reverb Setup
                 this.reverbNode = this.ctx.createConvolver();
-                this.reverbNode.buffer = this.createImpulseResponse(2.0, 2.0);
+                this.reverbNode.buffer = this.createImpulseResponse(2.5, 2.0);
                 
                 this.masterGain = this.ctx.createGain();
-                this.masterGain.gain.value = 0.8;
+                this.masterGain.gain.value = 0.85;
                 
                 this.reverbGain = this.ctx.createGain();
-                this.reverbGain.gain.value = 0.25;
+                this.reverbGain.gain.value = 0.3;
 
                 this.reverbNode.connect(this.reverbGain);
                 this.reverbGain.connect(this.masterGain);
                 this.masterGain.connect(this.ctx.destination);
 
                 this.initWind();
-                this.initGrassRustle();
+                this.initBGM();
             }
 
             createImpulseResponse(duration, decay) {
@@ -325,8 +428,7 @@
                 let lastOut = 0.0;
                 for (let i = 0; i < bufferSize; i++) {
                     const white = Math.random() * 2 - 1;
-                    // Pink noise filter to remove harsh high frequencies
-                    output[i] = (lastOut + (0.02 * white)) / 1.02;
+                    output[i] = (lastOut + (0.02 * white)) / 1.02; // Warm pink filter
                     lastOut = output[i];
                 }
                 return buffer;
@@ -338,114 +440,142 @@
                 windNoise.buffer = noiseBuffer;
                 windNoise.loop = true;
 
-                // Dual bandpass filter for organic multi-tonal wind dynamics
                 this.windFilter = this.ctx.createBiquadFilter();
                 this.windFilter.type = 'bandpass';
-                this.windFilter.frequency.value = 320;
+                this.windFilter.frequency.value = 300;
                 this.windFilter.Q.value = 2.5;
-
-                this.windFilter2 = this.ctx.createBiquadFilter();
-                this.windFilter2.type = 'lowpass';
-                this.windFilter2.frequency.value = 600;
 
                 this.windGain = this.ctx.createGain();
                 this.windGain.gain.value = 0.12;
 
                 windNoise.connect(this.windFilter);
-                this.windFilter.connect(this.windFilter2);
-                this.windFilter2.connect(this.windGain);
-                
+                this.windFilter.connect(this.windGain);
                 this.windGain.connect(this.masterGain);
                 this.windGain.connect(this.reverbNode);
                 
                 windNoise.start();
             }
 
-            initGrassRustle() {
-                const rustleBuffer = this.createNoiseBuffer();
-                this.rustleSource = this.ctx.createBufferSource();
-                this.rustleSource.buffer = rustleBuffer;
-                this.rustleSource.loop = true;
+            initBGM() {
+                const bgmMaster = this.ctx.createGain();
+                bgmMaster.gain.value = 0.22;
+                bgmMaster.connect(this.masterGain);
+                bgmMaster.connect(this.reverbNode);
 
-                this.rustleFilter = this.ctx.createBiquadFilter();
-                this.rustleFilter.type = 'highpass';
-                this.rustleFilter.frequency.value = 2200;
+                const biomeNotes = {
+                    'ANCIENT RUINS (CENTER)': [130.81, 196.00, 261.63, 392.00], 
+                    'EMERALD MEADOW BIOME': [146.83, 220.00, 293.66, 370.00],   
+                    'RED AUTUMN BIOME': [110.00, 164.81, 220.00, 329.63],       
+                    'PINK BLOSSOM BIOME': [174.61, 261.63, 349.23, 440.00],     
+                    'MYSTIC VIOLET BIOME': [123.47, 185.00, 246.94, 311.13]     
+                };
 
-                this.rustleGain = this.ctx.createGain();
-                this.rustleGain.gain.value = 0.0;
+                this.biomes.forEach((biome) => {
+                    const biomeGain = this.ctx.createGain();
+                    biomeGain.gain.value = 0.0;
+                    biomeGain.connect(bgmMaster);
 
-                this.rustleSource.connect(this.rustleFilter);
-                this.rustleFilter.connect(this.rustleGain);
-                this.rustleGain.connect(this.masterGain);
+                    this.bgmGains[biome] = biomeGain;
 
-                this.rustleSource.start();
+                    const freqs = biomeNotes[biome] || biomeNotes['EMERALD MEADOW BIOME'];
+                    freqs.forEach((freq, idx) => {
+                        const osc = this.ctx.createOscillator();
+                        const lfo = this.ctx.createOscillator();
+                        const lfoGain = this.ctx.createGain();
+                        const noteGain = this.ctx.createGain();
+
+                        osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
+                        osc.frequency.value = freq;
+
+                        lfo.frequency.value = 0.08 + idx * 0.03;
+                        lfoGain.gain.value = 0.05;
+                        lfo.connect(lfoGain.gain);
+
+                        noteGain.gain.value = 0.2 / freqs.length;
+
+                        osc.connect(noteGain);
+                        noteGain.connect(biomeGain);
+
+                        osc.start();
+                        lfo.start();
+                        this.bgmOscs.push(osc, lfo);
+                    });
+                });
             }
 
-            playFootstep(isRunning) {
+            playFootstep(isRunning, biome) {
                 if (!this.isInit) return;
-
                 const now = this.ctx.currentTime;
-                
-                // Low-end thud (paw impact)
+
+                // Paw impact base thud
                 const thudOsc = this.ctx.createOscillator();
                 const thudGain = this.ctx.createGain();
-                
                 thudOsc.type = 'sine';
-                const baseFreq = isRunning ? 95 : 75;
-                thudOsc.frequency.setValueAtTime(baseFreq + Math.random() * 15, now);
-                thudOsc.frequency.exponentialRampToValueAtTime(20, now + 0.09);
+                
+                const baseFreq = isRunning ? 100 : 75;
+                thudOsc.frequency.setValueAtTime(baseFreq + Math.random() * 12, now);
+                thudOsc.frequency.exponentialRampToValueAtTime(24, now + 0.07);
 
-                thudGain.gain.setValueAtTime(isRunning ? 0.35 : 0.2, now);
-                thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+                thudGain.gain.setValueAtTime(isRunning ? 0.4 : 0.22, now);
+                thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
 
                 thudOsc.connect(thudGain);
                 thudGain.connect(this.masterGain);
-
                 thudOsc.start(now);
-                thudOsc.stop(now + 0.09);
+                thudOsc.stop(now + 0.07);
 
-                // High-frequency foliage/dirt crunch
-                const crunchNoise = this.ctx.createBufferSource();
-                crunchNoise.buffer = this.createNoiseBuffer();
+                // Surface texture crackle
+                const crunchSource = this.ctx.createBufferSource();
+                crunchSource.buffer = this.createNoiseBuffer();
 
                 const crunchFilter = this.ctx.createBiquadFilter();
-                crunchFilter.type = 'bandpass';
-                crunchFilter.frequency.setValueAtTime(1800 + Math.random() * 600, now);
-                crunchFilter.Q.value = 1.8;
-
                 const crunchGain = this.ctx.createGain();
-                const volume = isRunning ? 0.18 : 0.09;
-                crunchGain.gain.setValueAtTime(volume + Math.random() * 0.03, now);
-                crunchGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
 
-                crunchNoise.connect(crunchFilter);
+                let filterFreq = 1600;
+                let filterType = 'bandpass';
+
+                if (biome === 'ANCIENT RUINS (CENTER)') {
+                    filterFreq = 900;
+                    filterType = 'lowpass';
+                } else if (biome === 'PINK BLOSSOM BIOME') {
+                    filterFreq = 2400;
+                }
+
+                crunchFilter.type = filterType;
+                crunchFilter.frequency.setValueAtTime(filterFreq + (Math.random() * 300 - 150), now);
+                crunchFilter.Q.value = 2.0;
+
+                const vol = isRunning ? 0.15 : 0.07;
+                crunchGain.gain.setValueAtTime(vol + Math.random() * 0.03, now);
+                crunchGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+                crunchSource.connect(crunchFilter);
                 crunchFilter.connect(crunchGain);
                 crunchGain.connect(this.masterGain);
                 crunchGain.connect(this.reverbNode);
 
-                crunchNoise.start(now);
-                crunchNoise.stop(now + 0.07);
+                crunchSource.start(now);
+                crunchSource.stop(now + 0.06);
             }
 
-            update(time, isMoving, isRunning) {
+            update(time, isMoving, isRunning, currentBiome) {
                 if (!this.isInit) return;
 
-                // Dynamic wind modulation
-                const windFreq = 220 + Math.sin(time * 0.4) * 140 + Math.cos(time * 1.1) * 80;
-                const windVol = 0.10 + Math.sin(time * 0.3) * 0.05;
-                this.windFilter.frequency.setTargetAtTime(windFreq, this.ctx.currentTime, 0.2);
-                this.windGain.gain.setTargetAtTime(windVol, this.ctx.currentTime, 0.2);
+                const windFreq = 220 + Math.sin(time * 0.35) * 140 + Math.cos(time * 0.9) * 70;
+                const windVol = 0.08 + Math.sin(time * 0.25) * 0.05;
+                this.windFilter.frequency.setTargetAtTime(windFreq, this.ctx.currentTime, 0.3);
+                this.windGain.gain.setTargetAtTime(windVol, this.ctx.currentTime, 0.3);
 
-                // Continuous soft grass swishing while moving
-                const targetRustleVol = isMoving ? (isRunning ? 0.08 : 0.04) : 0.0;
-                const targetRustleFreq = isRunning ? 2800 : 2000;
-                this.rustleGain.gain.setTargetAtTime(targetRustleVol, this.ctx.currentTime, 0.1);
-                this.rustleFilter.frequency.setTargetAtTime(targetRustleFreq, this.ctx.currentTime, 0.1);
+                this.biomes.forEach((b) => {
+                    const targetVol = (b === currentBiome) ? 1.0 : 0.0;
+                    if (this.bgmGains[b]) {
+                        this.bgmGains[b].gain.setTargetAtTime(targetVol, this.ctx.currentTime, 2.0);
+                    }
+                });
 
-                // Precise footstep rhythms
                 const stepInterval = isRunning ? 0.22 : 0.38;
                 if (isMoving && (time - this.lastStepTime > stepInterval)) {
-                    this.playFootstep(isRunning);
+                    this.playFootstep(isRunning, currentBiome);
                     this.lastStepTime = time;
                 }
             }
@@ -1385,7 +1515,7 @@
             }
         }
 
-        // --- THIRD-PERSON FOX CHARACTER CONTROLLER ---
+        // --- THIRD-PERSON FOX CHARACTER CONTROLLER WITH MOBILE COMPATIBILITY ---
         class FoxPlayerController {
             constructor(scene, camera, terrain, colliders, soundEngine) {
                 this.scene = scene;
@@ -1400,6 +1530,8 @@
                 this.activeAction = null;
 
                 this.keysPressed = {};
+                this.mobileInput = { x: 0, z: 0, run: false, jump: false };
+                
                 this.walkSpeed = 12.0;
                 this.runSpeed = 26.0;
                 this.rotationSpeed = 14.0;
@@ -1416,11 +1548,9 @@
                 this.minCameraDistance = 4.0;
                 this.maxCameraDistance = 35.0;
 
-                // OPTIMIZED SPONS/SPAWN POINT: Clear scenic entrance to Emerald Meadow Biome looking towards center
                 this.position = new THREE.Vector3(18, 0, 25);
                 this.position.y = this.terrain.getHeightAt(this.position.x, this.position.z);
 
-                // Smoothed Camera Tracking Pos
                 this.smoothedCamTarget = this.position.clone().add(new THREE.Vector3(0, 4.0, 0));
 
                 this.worldRadiusLimit = 650.0;
@@ -1430,8 +1560,12 @@
                 this.warningTimeout = null;
 
                 this.isPointerLocked = false;
+                this.touchLookId = null;
+                this.lastTouchX = 0;
+                this.lastTouchY = 0;
 
                 this.initListeners();
+                this.initMobileControls();
                 this.loadModel();
             }
 
@@ -1472,8 +1606,7 @@
                     this.keysPressed[e.code] = true;
 
                     if (e.code === 'Space' && this.isGrounded) {
-                        this.verticalVelocity = this.jumpImpulse;
-                        this.isGrounded = false;
+                        this.triggerJump();
                     }
                 });
 
@@ -1481,8 +1614,8 @@
                     this.keysPressed[e.code] = false;
                 });
 
-                document.body.addEventListener('click', () => {
-                    if (!this.isPointerLocked) {
+                document.body.addEventListener('click', (e) => {
+                    if (!this.isPointerLocked && window.innerWidth > 768) {
                         document.body.requestPointerLock();
                     }
                 });
@@ -1495,7 +1628,6 @@
                     if (this.isPointerLocked) {
                         this.cameraYaw -= e.movementX * 0.0022;
                         this.cameraPitch += e.movementY * 0.0022;
-
                         this.cameraPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.cameraPitch));
                     }
                 });
@@ -1504,6 +1636,129 @@
                     this.targetCameraDistance += e.deltaY * 0.008;
                     this.targetCameraDistance = Math.max(this.minCameraDistance, Math.min(this.maxCameraDistance, this.targetCameraDistance));
                 });
+
+                // Touch Camera Drag Control
+                window.addEventListener('touchstart', (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        const touch = e.changedTouches[i];
+                        if (touch.clientX > window.innerWidth / 2 && this.touchLookId === null) {
+                            this.touchLookId = touch.identifier;
+                            this.lastTouchX = touch.clientX;
+                            this.lastTouchY = touch.clientY;
+                        }
+                    }
+                }, { passive: true });
+
+                window.addEventListener('touchmove', (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        const touch = e.changedTouches[i];
+                        if (touch.identifier === this.touchLookId) {
+                            const dx = touch.clientX - this.lastTouchX;
+                            const dy = touch.clientY - this.lastTouchY;
+
+                            this.cameraYaw -= dx * 0.004;
+                            this.cameraPitch += dy * 0.004;
+                            this.cameraPitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.cameraPitch));
+
+                            this.lastTouchX = touch.clientX;
+                            this.lastTouchY = touch.clientY;
+                        }
+                    }
+                }, { passive: true });
+
+                const resetTouchLook = (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        if (e.changedTouches[i].identifier === this.touchLookId) {
+                            this.touchLookId = null;
+                        }
+                    }
+                };
+
+                window.addEventListener('touchend', resetTouchLook);
+                window.addEventListener('touchcancel', resetTouchLook);
+            }
+
+            initMobileControls() {
+                const base = document.getElementById('joystick-base');
+                const knob = document.getElementById('joystick-knob');
+                const btnJump = document.getElementById('btn-jump');
+                const btnRun = document.getElementById('btn-run');
+
+                let touchId = null;
+                const baseRadius = 65;
+
+                base.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    if (touchId === null) {
+                        const touch = e.changedTouches[0];
+                        touchId = touch.identifier;
+                        this.updateJoystick(touch, base, knob, baseRadius);
+                    }
+                }, { passive: false });
+
+                window.addEventListener('touchmove', (e) => {
+                    if (touchId !== null) {
+                        for (let i = 0; i < e.changedTouches.length; i++) {
+                            if (e.changedTouches[i].identifier === touchId) {
+                                this.updateJoystick(e.changedTouches[i], base, knob, baseRadius);
+                            }
+                        }
+                    }
+                }, { passive: true });
+
+                const endJoystick = (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        if (e.changedTouches[i].identifier === touchId) {
+                            touchId = null;
+                            knob.style.transform = `translate(0px, 0px)`;
+                            this.mobileInput.x = 0;
+                            this.mobileInput.z = 0;
+                        }
+                    }
+                };
+
+                window.addEventListener('touchend', endJoystick);
+                window.addEventListener('touchcancel', endJoystick);
+
+                btnJump.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.triggerJump();
+                    btnJump.classList.add('active');
+                }, { passive: false });
+
+                btnJump.addEventListener('touchend', () => btnJump.classList.remove('active'));
+
+                btnRun.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.mobileInput.run = !this.mobileInput.run;
+                    btnRun.classList.toggle('active', this.mobileInput.run);
+                }, { passive: false });
+            }
+
+            updateJoystick(touch, base, knob, radius) {
+                const rect = base.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                const dist = Math.hypot(dx, dy);
+
+                if (dist > radius) {
+                    dx = (dx / dist) * radius;
+                    dy = (dy / dist) * radius;
+                }
+
+                knob.style.transform = `translate(${dx}px, ${dy}px)`;
+                this.mobileInput.x = dx / radius;
+                this.mobileInput.z = dy / radius;
+            }
+
+            triggerJump() {
+                if (this.isGrounded) {
+                    this.verticalVelocity = this.jumpImpulse;
+                    this.isGrounded = false;
+                }
             }
 
             fadeToAction(name, duration = 0.15) {
@@ -1521,10 +1776,8 @@
                 }
             }
 
-            // SOLID COLLISION SYSTEM (Pushes Fox back from rocks and trees)
             resolveCollisions(newPos) {
                 const foxRadius = 3.2;
-                
                 for (let c of this.colliders) {
                     const dx = newPos.x - c.x;
                     const dz = newPos.z - c.z;
@@ -1536,7 +1789,6 @@
                         const obstacleHeight = c.height !== undefined ? c.height : 25;
                         
                         if (newPos.y >= obstacleY - 1.0 && newPos.y <= obstacleY + obstacleHeight) {
-                            // Resolve horizontal vector overlap
                             const overlap = minRadius - distXZ;
                             if (distXZ > 0.0001) {
                                 newPos.x += (dx / distXZ) * overlap;
@@ -1562,16 +1814,16 @@
             update(delta) {
                 if (!this.character) return;
 
-                let inputX = 0;
-                let inputZ = 0;
+                let inputX = this.mobileInput.x;
+                let inputZ = this.mobileInput.z;
 
                 if (this.keysPressed['KeyW'] || this.keysPressed['ArrowUp']) inputZ -= 1;
                 if (this.keysPressed['KeyS'] || this.keysPressed['ArrowDown']) inputZ += 1;
                 if (this.keysPressed['KeyA'] || this.keysPressed['ArrowLeft']) inputX -= 1;
                 if (this.keysPressed['KeyD'] || this.keysPressed['ArrowRight']) inputX += 1;
 
-                this.isMoving = (inputX !== 0 || inputZ !== 0);
-                this.isRunning = this.keysPressed['ShiftLeft'] || this.keysPressed['ShiftRight'];
+                this.isMoving = (Math.abs(inputX) > 0.1 || Math.abs(inputZ) > 0.1);
+                this.isRunning = this.keysPressed['ShiftLeft'] || this.keysPressed['ShiftRight'] || this.mobileInput.run;
 
                 const camForward = new THREE.Vector3();
                 this.camera.getWorldDirection(camForward);
@@ -1595,7 +1847,6 @@
                     this.character.quaternion.slerp(targetRotation, this.rotationSpeed * delta);
                 }
 
-                // Enforce Solid Geometry Collisions
                 this.resolveCollisions(this.position);
 
                 const distToCenter = Math.hypot(this.position.x, this.position.z);
@@ -1637,7 +1888,6 @@
             }
 
             updateCamera(delta) {
-                // Smooth Exponential Camera Interpolation (Fixes Shake / Jitter)
                 const targetCenter = this.position.clone().add(new THREE.Vector3(0, 4.0, 0));
                 this.smoothedCamTarget.lerp(targetCenter, 1.0 - Math.exp(-12.0 * delta));
 
@@ -1647,7 +1897,6 @@
                 let desiredCamY = this.smoothedCamTarget.y + this.currentCameraDistance * Math.sin(this.cameraPitch);
                 let desiredCamZ = this.smoothedCamTarget.z + this.currentCameraDistance * Math.cos(this.cameraYaw) * Math.cos(this.cameraPitch);
 
-                // Prevents camera clipping into high ground terrain dampener
                 const terrainHeightAtCam = this.terrain.getHeightAt(desiredCamX, desiredCamZ);
                 const minCamY = terrainHeightAtCam + 1.0;
 
@@ -1655,7 +1904,6 @@
                     desiredCamY = minCamY;
                 }
 
-                // Camera Collision & Raycast Obstacle Avoidance
                 const camRayDir = new THREE.Vector3(desiredCamX - this.smoothedCamTarget.x, desiredCamY - this.smoothedCamTarget.y, desiredCamZ - this.smoothedCamTarget.z);
                 const rayLen = camRayDir.length();
                 camRayDir.normalize();
@@ -1773,7 +2021,9 @@
                     this.soundEngine.init();
                     startOverlay.style.opacity = '0';
                     setTimeout(() => startOverlay.style.display = 'none', 600);
-                    document.body.requestPointerLock();
+                    if (window.innerWidth > 768) {
+                        document.body.requestPointerLock();
+                    }
                 });
             }
 
@@ -1802,9 +2052,10 @@
                 this.colossalTree.update(time);
 
                 this.player.update(delta);
-                this.soundEngine.update(time, this.player.isMoving, this.player.isRunning);
 
                 const biomeText = this.terrain.getBiomeAt(this.player.position.x, this.player.position.z);
+                this.soundEngine.update(time, this.player.isMoving, this.player.isRunning, biomeText);
+
                 document.getElementById('biome-indicator').innerText = `BIOME: ${biomeText}`;
 
                 const hour24 = Math.floor(this.timeOfDay * 24);
